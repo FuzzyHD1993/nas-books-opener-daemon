@@ -14,11 +14,13 @@ import (
 const (
 	listenAddr = "127.0.0.1:9999"
 	booksDir   = "/mnt/nas/Books"
+	youtubeDir = "/mnt/nas/YT_video"
 )
 
 var (
 	fileOpener   = getEnv("FILE_OPENER", "foliate")        // для книг
 	folderOpener = getEnv("FOLDER_OPENER", "cosmic-files") // для папок
+	videoOpener  = getEnv("VIDEO_OPENER", "vlc")           // для видео
 )
 
 func getEnv(key, def string) string {
@@ -83,6 +85,29 @@ func main() {
 
 		log.Printf("📂 Открываю папку: %s", booksDir)
 		return c.JSON(fiber.Map{"status": "opened", "path": booksDir})
+	})
+
+	// Открыть видео в плеере
+	app.Get("/open-video", func(c fiber.Ctx) error {
+		name := c.Query("name")
+		if name == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "name is required"})
+		}
+		if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			return c.Status(400).JSON(fiber.Map{"error": "invalid name"})
+		}
+		filePath := filepath.Join(youtubeDir, name)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			return c.Status(404).JSON(fiber.Map{"error": "file not found", "path": filePath})
+		}
+		if err := run(videoOpener, filePath); err != nil {
+			log.Printf("⚠️ %s не сработал: %v, пробую xdg-open", videoOpener, err)
+			if err := run("xdg-open", filePath); err != nil {
+				return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			}
+		}
+		log.Printf("▶️ Открываю видео: %s", filePath)
+		return c.JSON(fiber.Map{"status": "opened", "path": filePath})
 	})
 
 	log.Printf("📂 books-opener на %s", listenAddr)
