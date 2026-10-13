@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	listenAddr = "127.0.0.1:9999"
+	listenAddr = ":9999"
 	booksDir   = "/mnt/nas/Books"
 	youtubeDir = "/mnt/nas/YT_video"
 )
