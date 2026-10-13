@@ -110,6 +110,40 @@ func main() {
 		return c.JSON(fiber.Map{"status": "opened", "path": filePath})
 	})
 
+	// Открыть медиа по полному пути (фильмы/сериалы)
+	app.Get("/open-media", func(c fiber.Ctx) error {
+		path := c.Query("path")
+		if path == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "path is required"})
+		}
+		allowedPrefixes := []string{
+			"/mnt/nas/root/FuzzyHD/Movies/",
+			"/mnt/nas/root/FuzzyHD/TV/",
+			"/mnt/nas/YT_video/",
+		}
+		ok := false
+		for _, p := range allowedPrefixes {
+			if strings.HasPrefix(path, p) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return c.Status(403).JSON(fiber.Map{"error": "path not allowed"})
+		}
+		if _, err := os.Stat(path); err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "file not found", "path": path})
+		}
+		if err := run(videoOpener, path); err != nil {
+			log.Printf("⚠️ %s не сработал: %v, пробую xdg-open", videoOpener, err)
+			if err := run("xdg-open", path); err != nil {
+				return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			}
+		}
+		log.Printf("▶️ Открываю медиа: %s", path)
+		return c.JSON(fiber.Map{"status": "opened", "path": path})
+	})
+
 	log.Printf("📂 books-opener на %s", listenAddr)
 	log.Printf("   Папка с книгами: %s", booksDir)
 	log.Printf("   Открываю файлы: %s", fileOpener)
