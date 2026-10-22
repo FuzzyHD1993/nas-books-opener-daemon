@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -112,10 +113,17 @@ func main() {
 
 	// Открыть медиа по полному пути (фильмы/сериалы)
 	app.Get("/open-media", func(c fiber.Ctx) error {
-		path := c.Query("path")
-		if path == "" {
+		rawPath := c.Query("path")
+		if rawPath == "" {
 			return c.Status(400).JSON(fiber.Map{"error": "path is required"})
 		}
+
+		// Очищаем и делаем абсолютным до проверки allowlist
+		path, err := filepath.Abs(filepath.Clean(rawPath))
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "invalid path", "path": rawPath})
+		}
+
 		allowedPrefixes := []string{
 			"/mnt/nas/root/FuzzyHD/Movies/",
 			"/mnt/nas/root/FuzzyHD/TV/",
@@ -131,6 +139,22 @@ func main() {
 		if !ok {
 			return c.Status(403).JSON(fiber.Map{"error": "path not allowed"})
 		}
+
+		// Разрешаем симлинки и проверяем снова, чтобы нельзя было выйти из разрешённых директорий
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			resolvedOk := false
+			for _, p := range allowedPrefixes {
+				if strings.HasPrefix(resolved, p) {
+					resolvedOk = true
+					break
+				}
+			}
+			if !resolvedOk {
+				return c.Status(403).JSON(fiber.Map{"error": "path not allowed", "resolved": resolved})
+			}
+			path = resolved
+		}
+
 		if _, err := os.Stat(path); err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "file not found", "path": path})
 		}
@@ -155,5 +179,20 @@ func run(command string, args ...string) error {
 	cmd := exec.Command(command, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// Даём процессу немного времени: если он сразу завершился с ошибкой —
+	// возвращаем ошибку, чтобы endpoint не отвечал "opened" при провале запуска.
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+		return nil
+	case <-time.After(1500 * time.Millisecond):
+		return nil // процесс ещё жив — считаем успешным запуском
+	}
 }
